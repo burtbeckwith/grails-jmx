@@ -2,7 +2,8 @@ import org.springframework.jmx.export.MBeanExporter
 import org.springframework.jmx.export.assembler.MethodExclusionMBeanInfoAssembler
 import org.springframework.jmx.support.MBeanServerFactoryBean
 
-import org.codehaus.groovy.grails.commons.GrailsClassUtils as GCU
+import org.codehaus.groovy.grails.commons.GrailsApplication
+import org.codehaus.groovy.grails.commons.GrailsClassUtils
 import org.codehaus.groovy.grails.commons.GrailsServiceClass
 
 import org.apache.log4j.jmx.HierarchyDynamicMBean
@@ -67,7 +68,7 @@ class JmxGrailsPlugin {
 		logMBean.addLoggerMBean(Logger.rootLogger.name)
 	}
 
-	private void exportServices(application, MBeanExporter exporter, String domain, ctx) {
+	private void exportServices(GrailsApplication application, MBeanExporter exporter, String domain, ctx) {
 		Properties excludeMethods = new Properties()
 
 		for (GrailsServiceClass serviceClass in application.serviceClasses) {
@@ -86,33 +87,42 @@ class JmxGrailsPlugin {
 		exporter.assembler = new MethodExclusionMBeanInfoAssembler(ignoredMethodMappings: excludeMethods)
 	}
 
-	private void exportClass(MBeanExporter exporter, String domain, ctx, serviceClass, String serviceName, String propertyName,
-				Properties excludeMethods, String type) {
+	private void exportClass(MBeanExporter exporter, String domain, ctx, Class serviceClass, String serviceName,
+				String propertyName, Properties excludeMethods, String type) {
 
-		String objectName = "$type=$serviceName,type=$type"
-
-		def exposeList = GCU.getStaticPropertyValue(serviceClass, 'expose')
-		def exposeMap = GCU.getStaticPropertyValue(serviceClass, 'jmxexpose')
-		def scope = GCU.getStaticPropertyValue(serviceClass, 'scope')
-
+		def exposeList = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'expose')
 		def jmxExposed = exposeList?.find { it.startsWith('jmx') }
-		boolean singleton = (scope == null || scope != 'singleton')
-
-		if (jmxExposed && singleton) {
-			// change service name if provided by jmx:objectname
-			def m = jmxExposed =~ 'jmx:(.*)'
-			if (m) {
-				objectName = "${m[0][1]}"
-			}
-			if (exposeMap != null && exposeMap['excludeMethods']) {
-				excludeMethods.setProperty("${domain}:${objectName}", exposeMap['excludeMethods'])
-			}
-
-			exporter.beans."${domain}:${objectName}" = ctx.getBean(propertyName)
+		if (!jmxExposed) {
+			return
 		}
+
+		def scope = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'scope')
+
+		boolean singleton = (scope == null || scope != 'singleton')
+		if (!singleton) {
+			return
+		}
+
+		def exposeMap = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'jmxexpose')
+		if (exposeMap == null) {
+			return
+		}
+
+		// change service name if provided by jmx:objectname
+		String objectName = "$type=$serviceName,type=$type"
+		def m = jmxExposed =~ 'jmx:(.*)'
+		if (m) {
+			objectName = "${m[0][1]}"
+		}
+
+		if (exposeMap.excludeMethods) {
+			excludeMethods.setProperty("${domain}:${objectName}", exposeMap.excludeMethods)
+		}
+
+		exporter.beans."${domain}:${objectName}" = ctx.getBean(propertyName)
 	}
 
-	private void exportConfiguredObjects(application, MBeanExporter exporter, String domain, ctx) {
+	private void exportConfiguredObjects(GrailsApplication application, MBeanExporter exporter, String domain, ctx) {
 		// example config:
 		/*
 			grails {
@@ -122,31 +132,31 @@ class JmxGrailsPlugin {
 			}
 		*/
 		def configuredObjectBeans = application.config.grails.jmx.exportBeans
-
-		if (configuredObjectBeans) {
-			if (configuredObjectBeans instanceof String) {
-				// allow list or single class, e.g.
-				//     exportBeans = ['myBeanOne', 'myBeanTwo']
-				//      ... or ...
-				//     exportBeans = 'myBeanOne'
-
-				configuredObjectBeans = [configuredObjectBeans]
-			}
-
-			Properties excludeMethods = new Properties()
-
-			configuredObjectBeans.each { jmxBeanName ->
-
-				def bean = ctx.getBean(jmxBeanName)
-				def jmxServiceClass = bean.getClass()
-				def serviceName = jmxServiceClass.simpleName
-
-				exportClass exporter, domain, ctx, jmxServiceClass, serviceName,
-					jmxBeanName, excludeMethods, 'utility'
-			}
-
-			handleExcludeMethods(exporter, excludeMethods)
+		if (!configuredObjectBeans) {
+			return
 		}
+
+		if (configuredObjectBeans instanceof String) {
+			// allow list or single class, e.g.
+			//     exportBeans = ['myBeanOne', 'myBeanTwo']
+			//      ... or ...
+			//     exportBeans = 'myBeanOne'
+
+			configuredObjectBeans = [configuredObjectBeans]
+		}
+
+		Properties excludeMethods = new Properties()
+
+		for (jmxBeanName in configuredObjectBeans) {
+			def bean = ctx.getBean(jmxBeanName)
+			Class jmxServiceClass = bean.getClass()
+			String serviceName = jmxServiceClass.simpleName
+
+			exportClass exporter, domain, ctx, jmxServiceClass, serviceName,
+				jmxBeanName, excludeMethods, 'utility'
+		}
+
+		handleExcludeMethods(exporter, excludeMethods)
 	}
 
 	private void registerMBeans(MBeanExporter exporter) {
