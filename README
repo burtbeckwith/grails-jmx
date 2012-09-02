@@ -1,0 +1,40 @@
+This plugin is functional and is maturing... Looking to align with the jmxbuilder but it isn't ready yet.
+
+Current Functionality
+1. registers with jmx services which are singletons and annotated with:  static expose = ['jmx']
+2. provides default object naming {appname}:service=${serviceName},type=service
+3. allows for object name override:  static expose = ['jmx:service=Country,type=special']
+4. allows for exclusion map: static jmxexpose = ['excludeMethods':'isTransactional,setTransactional,getTransactional,getJmxexpose,setJmxexpose,getExpose,setExpose']
+This needs to change to the jmxbuilder way!
+5. It checks to see if hibernate is a plugin... if true, then it exposes the hibernate statistics
+6. It exposes log4j
+7. It exposes the datasource
+8. It allows for any spring bean to be exposed through the Config.groovy
+grails {
+	jmx {
+		exportClasses = ['myBeanOne', 'myBeanTwo']
+	}
+}
+These beans need to have: static expose = ['jmx']
+and they have to be registered spring beans.
+
+Issues
+1. jmxBuilder has a bug... vladimir is fixing it... but there is certain to be a delay in getting it to grails from groovy
+
+TODO list
+1. improve declarative way to include or exclude methods and properties... hoping jmxbuilder provides the way
+2. provide meta data for exposed elements.  This jmxbuilder definitely provides!
+3. by default restrict the sensible defaults... most / all statics for groovy classes, certain datasource properties which make no sense, etc.
+4. remove attribute methods from the operations list.  access is through attributes
+5. default to read only for getter only and read/write for getter/setter... jmxbuilder doesn't use this default...
+6. allow for read/write configuration declaratively
+7. go through the most popular plugins and see what can be exposed... jms, security, etc.
+8. documentation and blogging
+9. expose jetty if present
+10. error handling: need to check for malformed objectnames and fall back to standard service name... what to do if standard naming is taken? at least fail gracefully
+11. onChange and onConfigChange events... need to handle.  might need to check for plugin changes
+12. there is an error when view the database mbean... need to fix
+	Jun 3, 2009 2:02:27 PM RequiredModelMBean getAttributes(String[])
+	SEVERE: Failed to get "LoginTimeout": javax.management.MBeanException: RuntimeException thrown in RequiredModelMBean while trying to invoke operation getLoginTimeout
+13. add a grails command to add mbean to config file ?
+14. default utility type is utility... hmmm...
