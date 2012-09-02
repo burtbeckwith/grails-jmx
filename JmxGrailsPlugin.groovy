@@ -24,6 +24,13 @@ class JmxGrailsPlugin {
 	def developers = [[name: 'Burt Beckwith', email: 'beckwithb@vmware.com']]
 	def scm = [url: 'https://github.com/burtbeckwith/grails-jmx']
 
+	private static final String DEFAULT_EXCLUDE_METHODS =
+		'isTransactional,setTransactional,getTransactional,' +
+		'getJmxexpose,setJmxexpose,' +
+		'getExpose,setExpose,' +
+		'getMetaClass,setMetaClass,' +
+		'getScope,setScope'
+
 	def doWithSpring = {
 
 		// adding the mbean server configuration and export with mbeanserver ref... no exports
@@ -105,7 +112,7 @@ class JmxGrailsPlugin {
 
 		def exposeMap = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'jmxexpose')
 		if (exposeMap == null) {
-			return
+			exposeMap = [excludeMethods: DEFAULT_EXCLUDE_METHODS]
 		}
 
 		// change service name if provided by jmx:objectname
