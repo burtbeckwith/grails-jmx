@@ -10,7 +10,7 @@ import org.apache.log4j.jmx.HierarchyDynamicMBean
 import org.apache.log4j.Logger
 
 class JmxGrailsPlugin {
-	def version = '0.8'
+	def version = '0.7.1'
 	def grailsVersion = '2.0 > *'
 	def loadAfter = ['hibernate']
 	def author = 'Ken Sipe'
