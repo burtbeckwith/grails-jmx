@@ -1,28 +1,34 @@
-import org.springframework.jmx.export.MBeanExporter
-import org.springframework.jmx.export.assembler.MethodExclusionMBeanInfoAssembler
-import org.springframework.jmx.support.MBeanServerFactoryBean
-
+import org.apache.log4j.Logger
+import org.apache.log4j.jmx.HierarchyDynamicMBean
 import org.codehaus.groovy.grails.commons.GrailsApplication
 import org.codehaus.groovy.grails.commons.GrailsClassUtils
 import org.codehaus.groovy.grails.commons.GrailsServiceClass
-
-import org.apache.log4j.jmx.HierarchyDynamicMBean
-import org.apache.log4j.Logger
+import org.slf4j.LoggerFactory
+import org.springframework.core.annotation.AnnotationUtils
+import org.springframework.jmx.export.MBeanExporter
+import org.springframework.jmx.export.annotation.AnnotationJmxAttributeSource
+import org.springframework.jmx.export.annotation.ManagedResource
+import org.springframework.jmx.export.assembler.MetadataMBeanInfoAssembler
+import org.springframework.jmx.export.assembler.MethodExclusionMBeanInfoAssembler
+import org.springframework.jmx.export.naming.MetadataNamingStrategy
+import org.springframework.jmx.support.MBeanServerFactoryBean
 
 class JmxGrailsPlugin {
 	def version = '0.7.1'
 	def grailsVersion = '2.0 > *'
 	def loadAfter = ['hibernate']
-	def author = 'Ken Sipe'
-	def authorEmail = 'kensipe@gmail.com'
+	def author = 'Burt Beckwith'
+	def authorEmail = 'beckwithb@vmware.com'
 	def title = 'JMX Plugin'
-	def description = 'Adds JMX support to a Grails application. Provides ability to expose services as MBeans'
+	def description = 'Adds JMX support and provides the ability to expose services and other Spring beans as MBeans'
 	def documentation = 'http://grails.org/plugin/jmx'
 
 	String license = 'APACHE'
 	def issueManagement = [system: 'JIRA', url: 'http://jira.grails.org/browse/GPJMX']
-	def developers = [[name: 'Burt Beckwith', email: 'beckwithb@vmware.com']]
+	def developers = [[name: 'Ken Sipe', email: 'kensipe@gmail.com']]
 	def scm = [url: 'https://github.com/burtbeckwith/grails-jmx']
+
+	private final org.slf4j.Logger log = LoggerFactory.getLogger('grails.plugin.jmx.JmxGrailsPlugin')
 
 	private static final String DEFAULT_EXCLUDE_METHODS =
 		'isTransactional,setTransactional,getTransactional,' +
@@ -39,16 +45,38 @@ class JmxGrailsPlugin {
 		}
 
 		if (manager?.hasGrailsPlugin('hibernate')) {
-			hibernateStats(org.hibernate.jmx.StatisticsService) {
+			hibernateStatsMBean(org.hibernate.jmx.StatisticsService) {
 				sessionFactory = ref('sessionFactory')
 			}
 		}
 
-		log4j(HierarchyDynamicMBean)
+		log4jMBean(HierarchyDynamicMBean)
 
-		exporter(MBeanExporter) {
-			server = ref(mbeanServer)
+		mbeanExporter(MBeanExporter) {
+			server = ref('mbeanServer')
 			beans = [:]
+		}
+
+		// allows the use of annotations for attributes/operations
+		jmxAnnotationAttributeSource(AnnotationJmxAttributeSource)
+
+		jmxAnnotationAssembler(MetadataMBeanInfoAssembler) {
+			attributeSource = ref('jmxAnnotationAttributeSource')
+		}
+
+		// an exporter that uses annotations
+		jmxAnnotationMBeanExporter(MBeanExporter) { bean ->
+			bean.lazyInit = false
+			assembler = ref('jmxAnnotationAssembler')
+			server = ref('mbeanServer')
+			beans = [:]
+			autodetectMode = MBeanExporter.AUTODETECT_ASSEMBLER // don't autodetect mbeans from other exporter
+			namingStrategy = ref('jmxAnnotationNamingStrategy')
+		}
+
+		jmxAnnotationNamingStrategy(MetadataNamingStrategy) {
+			attributeSource = ref('jmxAnnotationAttributeSource')
+			defaultDomain = application.metadata['app.name']
 		}
 	}
 
@@ -56,7 +84,7 @@ class JmxGrailsPlugin {
 
 		String domain = application.metadata['app.name']
 
-		MBeanExporter exporter = ctx.exporter
+		MBeanExporter exporter = ctx.mbeanExporter
 		// we probably need to create our own assembler...
 		//exporter.assembler = new org.springframework.jmx.export.assembler.SimpleReflectiveMBeanInfoAssembler()
 
@@ -69,16 +97,22 @@ class JmxGrailsPlugin {
 		registerMBeans(exporter)
 	}
 
-	private void exportLogger(ctx, MBeanExporter exporter, domain) {
-		HierarchyDynamicMBean logMBean = ctx.log4j
+	private void exportLogger(ctx, MBeanExporter exporter, String domain) {
+		HierarchyDynamicMBean logMBean = ctx.log4jMBean
 		exporter.beans."${domain}:service=log4j,type=configuration" = logMBean
-		logMBean.addLoggerMBean(Logger.rootLogger.name)
+		logMBean.addLoggerMBean Logger.rootLogger.name
 	}
 
 	private void exportServices(GrailsApplication application, MBeanExporter exporter, String domain, ctx) {
 		Properties excludeMethods = new Properties()
 
 		for (GrailsServiceClass serviceClass in application.serviceClasses) {
+
+			if (AnnotationUtils.findAnnotation(serviceClass.clazz, ManagedResource)) {
+				log.debug "Skipping auto-registration of $serviceClass.clazz.name since it's annotated with @ManagedResource and will be registered via metadata"
+				continue
+			}
+
 			exportClass exporter, domain, ctx, serviceClass.clazz, serviceClass.shortName,
 				serviceClass.propertyName, excludeMethods, 'service'
 		}
@@ -127,6 +161,7 @@ class JmxGrailsPlugin {
 		}
 
 		exporter.beans."${domain}:${objectName}" = ctx.getBean(propertyName)
+		log.debug "Auto-registered service $propertyName as a JMX MBean"
 	}
 
 	private void exportConfiguredObjects(GrailsApplication application, MBeanExporter exporter, String domain, ctx) {
@@ -159,8 +194,7 @@ class JmxGrailsPlugin {
 			Class jmxServiceClass = bean.getClass()
 			String serviceName = jmxServiceClass.simpleName
 
-			exportClass exporter, domain, ctx, jmxServiceClass, serviceName,
-				jmxBeanName, excludeMethods, 'utility'
+			exportClass exporter, domain, ctx, jmxServiceClass, serviceName, jmxBeanName, excludeMethods, 'utility'
 		}
 
 		handleExcludeMethods(exporter, excludeMethods)
@@ -172,8 +206,8 @@ class JmxGrailsPlugin {
 	}
 
 	private void exportConfigBeans(MBeanExporter exporter, ctx, String domain) {
-		if (ctx.hibernateStats) {
-			exporter.beans."${domain}:service=hibernate,type=configuration" = ctx.hibernateStats
+		if (ctx.hibernateStatsMBean) {
+			exporter.beans."${domain}:service=hibernate,type=configuration" = ctx.hibernateStatsMBean
 		}
 
 		// TODO: should check for database plugin
