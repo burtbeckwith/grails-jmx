@@ -1,10 +1,13 @@
-import org.apache.log4j.Logger
-import org.apache.log4j.jmx.HierarchyDynamicMBean
+import javax.sql.DataSource
+
 import org.codehaus.groovy.grails.commons.GrailsApplication
 import org.codehaus.groovy.grails.commons.GrailsClassUtils
 import org.codehaus.groovy.grails.commons.GrailsServiceClass
+import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationContext
 import org.springframework.core.annotation.AnnotationUtils
+import org.springframework.jdbc.datasource.TransactionAwareDataSourceProxy
 import org.springframework.jmx.export.MBeanExporter
 import org.springframework.jmx.export.annotation.AnnotationJmxAttributeSource
 import org.springframework.jmx.export.annotation.ManagedResource
@@ -28,7 +31,7 @@ class JmxGrailsPlugin {
 	def developers = [[name: 'Ken Sipe', email: 'kensipe@gmail.com']]
 	def scm = [url: 'https://github.com/burtbeckwith/grails-jmx']
 
-	private final org.slf4j.Logger log = LoggerFactory.getLogger('grails.plugin.jmx.JmxGrailsPlugin')
+	private final Logger log = LoggerFactory.getLogger('grails.plugin.jmx.JmxGrailsPlugin')
 
 	private static final String DEFAULT_EXCLUDE_METHODS =
 		'isTransactional,setTransactional,getTransactional,' +
@@ -43,14 +46,6 @@ class JmxGrailsPlugin {
 		mbeanServer(MBeanServerFactoryBean) {
 			locateExistingServerIfPossible = true
 		}
-
-		if (manager?.hasGrailsPlugin('hibernate')) {
-			hibernateStatsMBean(org.hibernate.jmx.StatisticsService) {
-				sessionFactory = ref('sessionFactory')
-			}
-		}
-
-		log4jMBean(HierarchyDynamicMBean)
 
 		mbeanExporter(MBeanExporter) {
 			server = ref('mbeanServer')
@@ -78,6 +73,36 @@ class JmxGrailsPlugin {
 			attributeSource = ref('jmxAnnotationAttributeSource')
 			defaultDomain = application.metadata['app.name']
 		}
+
+		registerHibernateStatisticsService.delegate = delegate
+		registerHibernateStatisticsService()
+
+		registerLog4jMBeans.delegate = delegate
+		registerLog4jMBeans()
+	}
+
+	private registerHibernateStatisticsService = { conf ->
+		try {
+			Class.forName('org.hibernate.jmx.StatisticsService', true, Thread.currentThread().contextClassLoader)
+
+			hibernateStatsMBean(org.hibernate.jmx.StatisticsService) {
+				sessionFactory = ref('sessionFactory')
+			}
+		}
+		catch (e) {
+			// Hibernate isn't available
+		}
+	}
+
+	private registerLog4jMBeans = { conf ->
+		try {
+			Class.forName('org.apache.log4j.jmx.HierarchyDynamicMBean', true, Thread.currentThread().contextClassLoader)
+
+			log4jMBean(org.apache.log4j.jmx.HierarchyDynamicMBean)
+		}
+		catch (e) {
+			// Log4j isn't available
+		}
 	}
 
 	def doWithApplicationContext = { ctx ->
@@ -97,10 +122,13 @@ class JmxGrailsPlugin {
 		registerMBeans(exporter)
 	}
 
-	private void exportLogger(ctx, MBeanExporter exporter, String domain) {
-		HierarchyDynamicMBean logMBean = ctx.log4jMBean
-		exporter.beans."${domain}:service=log4j,type=configuration" = logMBean
-		logMBean.addLoggerMBean Logger.rootLogger.name
+	private void exportLogger(ApplicationContext ctx, MBeanExporter exporter, String domain) {
+		if (!ctx.containsBean('log4jMBean')) return
+
+		org.apache.log4j.jmx.HierarchyDynamicMBean hierarchyBean = ctx.log4jMBean
+		exporter.beans."${domain}:service=log4j,type=configuration" = hierarchyBean
+
+		hierarchyBean.addLoggerMBean org.apache.log4j.Logger.rootLogger.name
 	}
 
 	private void exportServices(GrailsApplication application, MBeanExporter exporter, String domain, ctx) {
@@ -129,7 +157,7 @@ class JmxGrailsPlugin {
 	}
 
 	private void exportClass(MBeanExporter exporter, String domain, ctx, Class serviceClass, String serviceName,
-				String propertyName, Properties excludeMethods, String type) {
+	                         String propertyName, Properties excludeMethods, String type) {
 
 		def exposeList = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'expose')
 		def jmxExposed = exposeList?.find { it.startsWith('jmx') }
@@ -189,7 +217,7 @@ class JmxGrailsPlugin {
 
 		Properties excludeMethods = new Properties()
 
-		for (jmxBeanName in configuredObjectBeans) {
+		for (String jmxBeanName in configuredObjectBeans) {
 			def bean = ctx.getBean(jmxBeanName)
 			Class jmxServiceClass = bean.getClass()
 			String serviceName = jmxServiceClass.simpleName
@@ -205,13 +233,16 @@ class JmxGrailsPlugin {
 		exporter.registerBeans()
 	}
 
-	private void exportConfigBeans(MBeanExporter exporter, ctx, String domain) {
-		if (ctx.hibernateStatsMBean) {
+	private void exportConfigBeans(MBeanExporter exporter, ApplicationContext ctx, String domain) {
+		if (ctx.containsBean('hibernateStatsMBean')) {
 			exporter.beans."${domain}:service=hibernate,type=configuration" = ctx.hibernateStatsMBean
 		}
 
-		// TODO: should check for database plugin
-		exporter.beans."${domain}:service=datasource,type=configuration" = ctx.dataSource
+		ctx.getBeansOfType(DataSource).each { String name, DataSource bean ->
+			if (name.indexOf('Unproxied') > -1 || !(bean instanceof TransactionAwareDataSourceProxy)) {
+				exporter.beans."${domain}:service=${name - 'Unproxied'},type=configuration" = bean
+			}
+		}
 	}
 
 	def onConfigChange = { event ->
