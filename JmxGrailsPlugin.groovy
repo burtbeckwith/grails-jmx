@@ -125,7 +125,7 @@ class JmxGrailsPlugin {
 	private void exportLogger(ApplicationContext ctx, MBeanExporter exporter, String domain) {
 		if (!ctx.containsBean('log4jMBean')) return
 
-		org.apache.log4j.jmx.HierarchyDynamicMBean hierarchyBean = ctx.log4jMBean
+		def hierarchyBean = ctx.log4jMBean
 		exporter.beans."${domain}:service=log4j,type=configuration" = hierarchyBean
 
 		hierarchyBean.addLoggerMBean org.apache.log4j.Logger.rootLogger.name
