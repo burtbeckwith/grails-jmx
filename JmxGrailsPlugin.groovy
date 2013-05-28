@@ -160,7 +160,7 @@ class JmxGrailsPlugin {
 	                         String propertyName, Properties excludeMethods, String type) {
 
 		def exposeList = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'expose')
-		def jmxExposed = exposeList?.find { it.startsWith('jmx') }
+		def jmxExposed = exposeList?.find { it instanceof String && it.startsWith('jmx') }
 		if (!jmxExposed) {
 			return
 		}
