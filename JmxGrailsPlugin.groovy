@@ -17,7 +17,7 @@ import org.springframework.jmx.export.naming.MetadataNamingStrategy
 import org.springframework.jmx.support.MBeanServerFactoryBean
 
 class JmxGrailsPlugin {
-	def version = '0.8'
+	def version = '0.8.1'
 	def grailsVersion = '2.0 > *'
 	def loadAfter = ['hibernate']
 	def author = 'Burt Beckwith'
