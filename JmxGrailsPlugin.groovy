@@ -71,7 +71,7 @@ class JmxGrailsPlugin {
 
 		jmxAnnotationNamingStrategy(MetadataNamingStrategy) {
 			attributeSource = ref('jmxAnnotationAttributeSource')
-			defaultDomain = application.metadata['app.name']
+			defaultDomain = application.metadata.getApplicationName()
 		}
 
 		registerHibernateStatisticsService.delegate = delegate
@@ -107,7 +107,7 @@ class JmxGrailsPlugin {
 
 	def doWithApplicationContext = { ctx ->
 
-		String domain = application.metadata['app.name']
+		String domain = application.metadata.getApplicationName()
 
 		MBeanExporter exporter = ctx.mbeanExporter
 		// we probably need to create our own assembler...
@@ -160,7 +160,7 @@ class JmxGrailsPlugin {
 	                         String propertyName, Properties excludeMethods, String type) {
 
 		def exposeList = GrailsClassUtils.getStaticPropertyValue(serviceClass, 'expose')
-		def jmxExposed = exposeList?.find { it instanceof String && it.startsWith('jmx') }
+		def jmxExposed = exposeList?.find { it instanceof CharSequence && it.toString().startsWith('jmx') }
 		if (!jmxExposed) {
 			return
 		}
