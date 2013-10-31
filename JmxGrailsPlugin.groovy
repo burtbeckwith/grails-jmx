@@ -17,11 +17,11 @@ import org.springframework.jmx.export.naming.MetadataNamingStrategy
 import org.springframework.jmx.support.MBeanServerFactoryBean
 
 class JmxGrailsPlugin {
-	def version = '0.8.1'
+	def version = '0.9'
 	def grailsVersion = '2.0 > *'
 	def loadAfter = ['hibernate']
 	def author = 'Burt Beckwith'
-	def authorEmail = 'beckwithb@vmware.com'
+	def authorEmail = 'burt@burtbeckwith.com'
 	def title = 'JMX Plugin'
 	def description = 'Adds JMX support and provides the ability to expose services and other Spring beans as MBeans'
 	def documentation = 'http://grails.org/plugin/jmx'
